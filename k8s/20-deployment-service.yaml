@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: customer-api
+  namespace: customer-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: customer-api
+  template:
+    metadata:
+      labels:
+        app: customer-api
+    spec:
+      serviceAccountName: customer-api-sa
+      containers:
+        - name: customer-api
+          image: your-registry/customer-api:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: DB_JDBC_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: customer-api-config
+                  key: DB_JDBC_URL
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: customer-api-secret
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: customer-api-secret
+                  key: DB_PASSWORD
+            - name: QUARKUS_LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: customer-api-config
+                  key: QUARKUS_LOG_LEVEL
+          readinessProbe:
+            httpGet:
+              path: /health.txt
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health.txt
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: customer-api-svc
+  namespace: customer-api
+spec:
+  selector:
+    app: customer-api
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
+      name: http

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog 
+  xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="
+       http://www.liquibase.org/xml/ns/dbchangelog
+       https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.23.xsd">
+
+  <changeSet id="001-create-customer" author="lab-safer">
+    <sqlFile path="db/changelog/001-create-customer.sql" relativeToChangelogFile="false" endDelimiter=";" splitStatements="true"/>
+    <rollback>
+      <sql>DROP TABLE IF EXISTS customer;</sql>
+    </rollback>
+  </changeSet>
+
+  <changeSet id="002-uniq-email" author="lab-safer">
+    <addUniqueConstraint tableName="customer" columnNames="email" constraintName="uk_customer_email"/>
+    <rollback>
+      <dropUniqueConstraint tableName="customer" constraintName="uk_customer_email"/>
+    </rollback>
+  </changeSet>
+</databaseChangeLog>
