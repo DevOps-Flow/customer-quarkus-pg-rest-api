@@ -110,3 +110,41 @@ cp .env.example .env
 
 # Personalizar quantidade e URL
 ./generate-customers.sh http://localhost:8080 500
+```
+
+## Endpoints
+
+### API REST
+
+Base URL: `http://localhost:8080/api/v1/customers` (desenvolvimento) ou `http://customer.lab-safer.com/api/v1/customers` (produção)
+
+- `POST /api/v1/customers` - Criar cliente
+- `GET /api/v1/customers` - Listar clientes (paginado)
+- `GET /api/v1/customers/{id}` - Buscar cliente por ID
+- `PUT /api/v1/customers/{id}` - Atualizar cliente
+- `DELETE /api/v1/customers/{id}` - Deletar cliente
+
+### Health Checks
+
+Endpoints de monitoramento para Kubernetes e observabilidade:
+
+- `GET /q/health` - Status geral da aplicação
+- `GET /q/health/ready` - Readiness probe (pronto para receber tráfego)
+- `GET /q/health/live` - Liveness probe (aplicação funcionando)
+
+**Exemplo de resposta:**
+
+```json
+{
+    "status": "UP",
+    "checks": [
+        {
+            "name": "Database connections health check",
+            "status": "UP",
+            "data": {
+                "<default>": "UP"
+            }
+        }
+    ]
+}
+```

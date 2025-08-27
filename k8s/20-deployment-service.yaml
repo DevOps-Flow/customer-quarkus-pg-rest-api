@@ -14,9 +14,11 @@ spec:
         app: customer-api
     spec:
       serviceAccountName: customer-api-sa
+      imagePullSecrets:
+        - name: harbor-pull
       containers:
         - name: customer-api
-          image: your-registry/customer-api:1.0.0
+          image: registry.lab-safer.com/library/customer-api-native:1.0.7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -44,13 +46,13 @@ spec:
                   key: QUARKUS_LOG_LEVEL
           readinessProbe:
             httpGet:
-              path: /health.txt
+              path: /q/health/ready
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /health.txt
+              path: /q/health/live
               port: 8080
             initialDelaySeconds: 15
             periodSeconds: 20

@@ -17,3 +17,10 @@ spec:
                 name: customer-api-svc
                 port:
                   number: 80
+          - path: /q
+            pathType: Prefix
+            backend:
+              service:
+                name: customer-api-svc
+                port:
+                  number: 80

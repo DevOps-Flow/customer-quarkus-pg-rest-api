@@ -6,7 +6,7 @@
 
   <groupId>com.labsafer</groupId>
   <artifactId>customer-quarkus-pg-rest-api</artifactId>
-  <version>1.0.0</version>
+  <version>1.0.7</version>
   <name>customer-quarkus-pg-rest-api</name>
 
   <properties>
@@ -60,6 +60,12 @@
     <dependency>
       <groupId>io.quarkus</groupId>
       <artifactId>quarkus-logging-json</artifactId>
+    </dependency>
+
+    <!-- Health checks -->
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-smallrye-health</artifactId>
     </dependency>
 
     <!-- Tests -->
