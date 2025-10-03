@@ -2,8 +2,21 @@
 
 API REST de clientes com Quarkus 3.x, Java 21 (LTS), PostgreSQL, Liquibase, SOLID, Clean Architecture, DTOs, logs JSON, build nativo com GraalVM e manifestos Kubernetes.
 
-## Arquitetura & Padrões
 
+## Integração contínua (GitHub Actions)
+
+O workflow em `.github/workflows/maven.yml` neste repositório garante que o JDK seja configurado com `actions/setup-java`, e — para runners self-hosted — baixa a versão mais recente do Apache Maven diretamente dos mirrors oficiais e adiciona seu `bin` ao PATH antes de executar o build.
+
+Por que isso foi feito:
+- Em runners self-hosted (por exemplo ARC-System no Kubernetes) o Maven pode não estar instalado por padrão. Baixar a versão oficial garante consistência.
+
+Alternativas recomendadas:
+- Usar Maven Wrapper (`mvnw`) — recomendo adicioná-lo ao repositório para builds reproduzíveis sem depender do ambiente do runner.
+- Executar o job dentro de um container que já tenha Maven e Java (por exemplo `maven:3.9.6-jdk-21`) — essa é a opção mais previsível em ambientes com Docker.
+
+***
+
+````
 - **12-Factor**: config via env (DB_JDBC_URL, DB_USERNAME, DB_PASSWORD, PORT).
 - **Java 21 LTS + GraalVM**: build nativo opcional para startup e footprint baixos.
 - **Quarkus + Hibernate ORM (Panache)**: persistência limpa.
