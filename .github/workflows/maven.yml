@@ -26,6 +26,8 @@ jobs:
       with:
         java-version: '21'
         distribution: 'temurin'
+        java-package: 'jdk'
+        check-latest: true
         cache: maven
     - name: Install latest Apache Maven into workspace
       shell: bash
