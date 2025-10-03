@@ -21,67 +21,13 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Set up JDK 21
-      uses: actions/setup-java@v4
-      with:
-        java-version: '21'
-        distribution: 'temurin'
-        java-package: 'jdk'
-        check-latest: true
-        cache: maven
-    - name: Install latest Apache Maven into workspace
-      shell: bash
+    
+    - name: Build and Test with Maven (in Docker)
       run: |
-        set -euo pipefail
-        echo "Installing latest Apache Maven..."
-
-        # If mvn already exists, print version and continue
-        if command -v mvn >/dev/null 2>&1; then
-          echo "mvn already available: $(mvn -v | head -n1)"
-          exit 0
-        fi
-
-        # Discover latest Maven 3.x version via Apache's maven directory listing
-        # This parses the directory list to find the highest 3.x version available.
-        INDEX_URL="https://dlcdn.apache.org/maven/maven-3/"
-        echo "Fetching available versions from ${INDEX_URL}"
-        AVAILABLE=$(curl -fsSL ${INDEX_URL} | sed -n 's/.*href="\([0-9]\+\.[0-9]\+\.[0-9]\+\)\/.*/\1/p' | sort -V)
-        if [ -z "$AVAILABLE" ]; then
-          echo "Could not list versions from primary mirror, falling back to archive.apache.org"
-          INDEX_URL="https://archive.apache.org/dist/maven/maven-3/"
-          AVAILABLE=$(curl -fsSL ${INDEX_URL} | sed -n 's/.*href="\([0-9]\+\.[0-9]\+\.[0-9]\+\)\/.*/\1/p' | sort -V)
-        fi
-
-        if [ -z "$AVAILABLE" ]; then
-          echo "ERROR: Could not determine Maven versions from mirrors. Exiting."
-          exit 1
-        fi
-
-        MAVEN_VERSION=$(echo "$AVAILABLE" | tail -n1)
-        echo "Latest discovered Maven version: ${MAVEN_VERSION}"
-
-        MAVEN_ARCHIVE=apache-maven-${MAVEN_VERSION}-bin.tar.gz
-        MAVEN_URL="${INDEX_URL}${MAVEN_VERSION}/binaries/${MAVEN_ARCHIVE}"
-
-        echo "Downloading ${MAVEN_URL}"
-        curl -fsSL ${MAVEN_URL} -o ${MAVEN_ARCHIVE} || (
-          echo "Primary download failed, trying archive mirror..." &&
-          curl -fsSL https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/${MAVEN_ARCHIVE} -o ${MAVEN_ARCHIVE}
-        )
-
-        tar -xzf ${MAVEN_ARCHIVE}
-        mkdir -p "$RUNNER_WORKSPACE/.maven"
-        mv apache-maven-${MAVEN_VERSION} "$RUNNER_WORKSPACE/.maven/apache-maven-${MAVEN_VERSION}"
-        echo "$RUNNER_WORKSPACE/.maven/apache-maven-${MAVEN_VERSION}/bin" >> $GITHUB_PATH
-        echo "Maven ${MAVEN_VERSION} installed to $RUNNER_WORKSPACE/.maven/apache-maven-${MAVEN_VERSION}"
-        mvn -v || true
-    - name: Cache Maven local repository
-      uses: actions/cache@v4
-      with:
-        path: ~/.m2/repository
-        key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-        restore-keys: |
-          ${{ runner.os }}-maven-
-    - name: Build and Test with Maven
-      run: mvn -B package --file pom.xml
+        docker run --rm \
+          -v ${{ github.workspace }}:/workspace \
+          -v ~/.m2:/root/.m2 \
+          -w /workspace \
+          maven:3.9-eclipse-temurin-21 \
+          mvn -B package --file pom.xml
 
