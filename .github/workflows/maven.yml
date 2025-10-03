@@ -73,6 +73,13 @@ jobs:
         echo "$RUNNER_WORKSPACE/.maven/apache-maven-${MAVEN_VERSION}/bin" >> $GITHUB_PATH
         echo "Maven ${MAVEN_VERSION} installed to $RUNNER_WORKSPACE/.maven/apache-maven-${MAVEN_VERSION}"
         mvn -v || true
+    - name: Cache Maven local repository
+      uses: actions/cache@v4
+      with:
+        path: ~/.m2/repository
+        key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+        restore-keys: |
+          ${{ runner.os }}-maven-
     - name: Build with Maven
       run: mvn -B package -DskipTests --file pom.xml
-      
+

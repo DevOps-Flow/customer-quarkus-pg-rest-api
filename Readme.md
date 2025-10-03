@@ -16,6 +16,12 @@ Alternativas recomendadas:
 
 ***
 
+### Cache de dependências Maven no CI
+
+O workflow usa cache para o diretório `~/.m2/repository` via `actions/cache` para evitar baixar dependências em todo build. A chave do cache é baseada no hash dos arquivos `pom.xml` do repositório — assim o cache é invalidado automaticamente quando você altera dependências no `pom.xml`.
+
+Se precisar forçar uma invalidação manual do cache, altere um `pom.xml` (por exemplo adicionando um comentário) ou modifique a chave do cache no workflow.
+
 ````
 - **12-Factor**: config via env (DB_JDBC_URL, DB_USERNAME, DB_PASSWORD, PORT).
 - **Java 21 LTS + GraalVM**: build nativo opcional para startup e footprint baixos.
