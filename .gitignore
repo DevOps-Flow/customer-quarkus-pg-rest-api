@@ -93,3 +93,11 @@ k8s/*Secret*.yaml
 application-local.properties
 application-dev.properties
 application-prod.properties
+
+# ARC Runner configuration (local only)
+arc-runner-*.yaml
+current-runner-config.yaml
+backup-arc-runner-*.yaml
+update-arc-runner.sh
+inspect-arc-config.sh
+DOCKER-ARC-GUIDE.md
