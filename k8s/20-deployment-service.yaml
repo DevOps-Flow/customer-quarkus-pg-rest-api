@@ -14,11 +14,11 @@ spec:
         app: customer-api
     spec:
       serviceAccountName: customer-api-sa
-      imagePullSecrets:
-        - name: harbor-pull
+      # imagePullSecrets:
+      #  - name: harbor-pull
       containers:
         - name: customer-api
-          image: registry.lab-safer.com/library/customer-api-native:1.0.7
+          image: ivancl4udio/customer-quarkus-pg-rest-api:1.0.1
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

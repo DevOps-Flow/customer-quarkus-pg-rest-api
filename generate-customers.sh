@@ -3,7 +3,7 @@
 # Script para gerar 1000 registros fictícios de customers
 # Uso: ./generate-customers.sh [URL_BASE] [QUANTIDADE]
 
-BASE_URL=${1:-"http://localhost:8080"}
+BASE_URL=${1:-"http://customer.lab.int:80"}
 TOTAL_RECORDS=${2:-1000}
 API_ENDPOINT="$BASE_URL/api/v1/customers"
 
