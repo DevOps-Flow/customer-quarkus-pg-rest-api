@@ -24,8 +24,6 @@ spec:
           {{- end -}}
     spec:
       serviceAccountName: customer-api-sa
-      # imagePullSecrets:
-      #  - name: harbor-pull
       containers:
         - name: customer-api
           image: ivancl4udio/customer-quarkus-pg-rest-api:1.0.1
@@ -41,16 +39,6 @@ spec:
                 configMapKeyRef:
                   name: customer-api-config
                   key: DB_JDBC_URL
-            #- name: DB_USERNAME
-            #  valueFrom:
-            #    secretKeyRef:
-            #      name: customer-api-secret
-            #      key: DB_USERNAME
-            #- name: DB_PASSWORD
-            #  valueFrom:
-            #    secretKeyRef:
-            #      name: customer-api-secret
-            #      key: DB_PASSWORD
             - name: QUARKUS_LOG_LEVEL
               valueFrom:
                 configMapKeyRef:
