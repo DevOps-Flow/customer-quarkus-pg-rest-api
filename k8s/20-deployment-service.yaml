@@ -12,6 +12,16 @@ spec:
     metadata:
       labels:
         app: customer-api
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/auth-path: "auth/kubernetes"
+        vault.hashicorp.com/role: "customer-api"
+        vault.hashicorp.com/agent-inject-secret-db-secrets.properties: "homelab/data/customer-api"
+        vault.hashicorp.com/agent-inject-template-db-secrets.properties: |
+          {{- with secret "homelab/data/customer-api" -}}
+          quarkus.datasource.username={{ .Data.data.db_username }}
+          quarkus.datasource.password={{ .Data.data.db_password }}
+          {{- end -}}
     spec:
       serviceAccountName: customer-api-sa
       # imagePullSecrets:
@@ -24,21 +34,23 @@ spec:
             - name: http
               containerPort: 8080
           env:
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: "/vault/secrets/db-secrets.properties"
             - name: DB_JDBC_URL
               valueFrom:
                 configMapKeyRef:
                   name: customer-api-config
                   key: DB_JDBC_URL
-            - name: DB_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: customer-api-secret
-                  key: DB_USERNAME
-            - name: DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: customer-api-secret
-                  key: DB_PASSWORD
+            #- name: DB_USERNAME
+            #  valueFrom:
+            #    secretKeyRef:
+            #      name: customer-api-secret
+            #      key: DB_USERNAME
+            #- name: DB_PASSWORD
+            #  valueFrom:
+            #    secretKeyRef:
+            #      name: customer-api-secret
+            #      key: DB_PASSWORD
             - name: QUARKUS_LOG_LEVEL
               valueFrom:
                 configMapKeyRef:
