@@ -20,6 +20,17 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+
+    - name: Check Docker Status
+      run: |
+        # Garantir que o Docker está rodando
+        sudo systemctl start docker || true
+        # Adicionar usuário atual ao grupo docker
+        sudo usermod -aG docker $USER
+        # Verificar status do Docker
+        docker info
+        # Garantir permissões no socket do Docker
+        sudo chmod 666 /var/run/docker.sock
     
     - name: Set up JDK 21
       uses: actions/setup-java@v4
@@ -68,6 +79,17 @@ jobs:
     
     steps:
     - uses: actions/checkout@v4
+
+    - name: Check Docker Status
+      run: |
+        # Garantir que o Docker está rodando
+        sudo systemctl start docker || true
+        # Adicionar usuário atual ao grupo docker
+        sudo usermod -aG docker $USER
+        # Verificar status do Docker
+        docker info
+        # Garantir permissões no socket do Docker
+        sudo chmod 666 /var/run/docker.sock
     
     - name: Set up JDK 21
       uses: actions/setup-java@v4
