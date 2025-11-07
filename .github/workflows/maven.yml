@@ -93,29 +93,23 @@ jobs:
             APP_VERSION=${{ steps.ver.outputs.VERSION }}
 
       # ===== ARGO CD: SYNC COM TOKEN DA CONTA ci =====
-      - name: Install Argo CD CLI (no-root safe)
+      - name: Argo CD sync via containerized CLI (opcional)
         env:
           VER: v2.12.3
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/.local/bin"
-          curl -fsSL -o "$HOME/.local/bin/argocd" \
-            "https://github.com/argoproj/argo-cd/releases/download/${VER}/argocd-linux-amd64"
-          chmod +x "$HOME/.local/bin/argocd"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          argocd version --client
-          
-      - name: Argo CD refresh & sync
-        env:
           ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
           ARGOCD_TOKEN:  ${{ secrets.ARGOCD_TOKEN }}
-          # Use secrets.ARGOCD_APP OU vars.ARGOCD_APP (ajuste a linha de baixo):
           ARGOCD_APP:    ${{ secrets.ARGOCD_APP }}
         run: |
-          set -e
-          # Login por token (ajuste --insecure se tiver certificado válido)
-          argocd login "$ARGOCD_SERVER" --grpc-web --auth-token "$ARGOCD_TOKEN" --insecure
-          # Recheca origem e sincroniza
-          argocd app get "$ARGOCD_APP" --refresh
-          argocd app sync "$ARGOCD_APP" --prune --timeout 600
-          argocd app wait "$ARGOCD_APP" --health --timeout 600
+          docker run --rm --network host \
+            quay.io/argoproj/argocd:$(echo $VER | sed 's/^v//') \
+            argocd login "$ARGOCD_SERVER" --grpc-web --auth-token "$ARGOCD_TOKEN" --insecure
+          docker run --rm --network host \
+            quay.io/argoproj/argocd:$(echo $VER | sed 's/^v//') \
+            argocd app get "$ARGOCD_APP" --refresh
+          docker run --rm --network host \
+            quay.io/argoproj/argocd:$(echo $VER | sed 's/^v//') \
+            argocd app sync "$ARGOCD_APP" --prune --timeout 600
+          docker run --rm --network host \
+            quay.io/argoproj/argocd:$(echo $VER | sed 's/^v//') \
+            argocd app wait "$ARGOCD_APP" --health --timeout 600
+
