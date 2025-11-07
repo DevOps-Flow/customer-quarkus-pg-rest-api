@@ -10,12 +10,11 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Se não existir, cai no fallback.
   DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE }}
 
 jobs:
   release:
-    name: Build once (native) • Docker • Push • ArgoCD
+    name: Build once (native) • Docker • Push • Update manifest • ArgoCD
     runs-on: arc-runner-set
 
     steps:
@@ -55,15 +54,7 @@ jobs:
 
       # ===== BUILD NATIVO (UMA ÚNICA VEZ) =====
       - name: Build Quarkus Native (container-build)
-        run: |
-          mvn -B -ntp package -Pnative -Dquarkus.native.container-build=true
-
-      - name: Upload native binary artifact (optional)
-        uses: actions/upload-artifact@v4
-        with:
-          name: native-runner
-          path: target/*-runner
-          retention-days: 14
+        run: mvn -B -ntp package -Pnative -Dquarkus.native.container-build=true
 
       # ===== DOCKER: LOGIN, BUILD & PUSH =====
       - name: Set up QEMU
@@ -79,6 +70,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build & Push image (version + latest)
+        id: dkr
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -87,49 +79,64 @@ jobs:
           tags: |
             ${{ steps.img.outputs.IMAGE }}:${{ steps.ver.outputs.VERSION }}
             ${{ steps.img.outputs.IMAGE }}:latest
-          # Se precisar multi-arch, descomente:
-          # platforms: linux/amd64,linux/arm64
           build-args: |
             APP_VERSION=${{ steps.ver.outputs.VERSION }}
 
+      # ===== UPDATE MANIFEST (20-deployment-service.yaml) =====
+      - name: Update deployment image reference (tag legível)
+        env:
+          IMAGE:  ${{ steps.img.outputs.IMAGE }}
+          VERSION: ${{ steps.ver.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          IMG="${IMAGE}:${VERSION}"
+
+          echo "Atualizando imagem no 20-deployment-service.yaml -> ${IMG}"
+
+          # instala yq no diretório do usuário (evita problemas de permissão)
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o "$HOME/.local/bin/yq" \
+            https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_linux_amd64
+          chmod +x "$HOME/.local/bin/yq"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+          # Atualiza a imagem do container principal do Deployment "customer-api"
+          "$HOME/.local/bin/yq" -i '
+            (. | select(.kind=="Deployment" and .metadata.name=="customer-api")
+               .spec.template.spec.containers[]
+               | select(.name=="customer-api")).image = strenv(IMG)
+          ' 20-deployment-service.yaml
+
+          git config user.name  "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+          git add 20-deployment-service.yaml
+          git commit -m "deploy: update image -> ${IMAGE}:${VERSION}"
+          git push
+
       # ===== ARGO CD: SYNC COM TOKEN DA CONTA ci =====
-      - name: Argo CD via CLI em container (sem login, robusto)
+      - name: Argo CD via CLI em container (sem login)
         env:
           VER: v2.12.3
           ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
-          ARGOCD_TOKEN:  ${{ secrets.ARGOCD_TOKEN }}   # JWT da conta 'ci'
+          ARGOCD_TOKEN:  ${{ secrets.ARGOCD_TOKEN }}
           ARGOCD_APP:    ${{ secrets.ARGOCD_APP }}
         run: |
           set -eo pipefail
-          # puxa a imagem (falha cedo se a tag não existir)
           docker pull quay.io/argoproj/argocd:${VER}
 
-          # app get --refresh
-          docker run --rm \
-            -e ARGOCD_SERVER="$ARGOCD_SERVER" \
-            -e ARGOCD_TOKEN="$ARGOCD_TOKEN" \
-            -e ARGOCD_APP="$ARGOCD_APP" \
-            quay.io/argoproj/argocd:${VER} \
-            sh -lc 'argocd --grpc-web --insecure \
-              --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_TOKEN" \
-              app get "$ARGOCD_APP" --refresh'
-
-          # app sync
-          docker run --rm \
-            -e ARGOCD_SERVER="$ARGOCD_SERVER" \
-            -e ARGOCD_TOKEN="$ARGOCD_TOKEN" \
-            -e ARGOCD_APP="$ARGOCD_APP" \
-            quay.io/argoproj/argocd:${VER} \
-            sh -lc 'argocd --grpc-web --insecure \
-              --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_TOKEN" \
-              app sync "$ARGOCD_APP" --prune --timeout 600'
-
-          # app wait --health
-          docker run --rm \
-            -e ARGOCD_SERVER="$ARGOCD_SERVER" \
-            -e ARGOCD_TOKEN="$ARGOCD_TOKEN" \
-            -e ARGOCD_APP="$ARGOCD_APP" \
-            quay.io/argoproj/argocd:${VER} \
-            sh -lc 'argocd --grpc-web --insecure \
-              --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_TOKEN" \
-              app wait "$ARGOCD_APP" --health --timeout 600'
+          # Refresh, sync e wait via token (sem login)
+          for CMD in \
+            "app get \"$ARGOCD_APP\" --refresh" \
+            "app sync \"$ARGOCD_APP\" --prune --timeout 600" \
+            "app wait \"$ARGOCD_APP\" --health --timeout 600"
+          do
+            echo "Executando: argocd $CMD"
+            docker run --rm \
+              -e ARGOCD_SERVER="$ARGOCD_SERVER" \
+              -e ARGOCD_TOKEN="$ARGOCD_TOKEN" \
+              -e ARGOCD_APP="$ARGOCD_APP" \
+              quay.io/argoproj/argocd:${VER} \
+              sh -lc "argocd --grpc-web --insecure \
+                --server \"\$ARGOCD_SERVER\" --auth-token \"\$ARGOCD_TOKEN\" \
+                \$CMD"
+          done
