@@ -91,25 +91,25 @@ jobs:
           set -euo pipefail
           IMG="${IMAGE}:${VERSION}"
 
-          echo "Atualizando imagem no 20-deployment-service.yaml -> ${IMG}"
+          echo "Atualizando imagem em k8s/20-deployment-service.yaml -> ${IMG}"
 
-          # instala yq no diretório do usuário (evita problemas de permissão)
+          # instala yq local (sem sudo, evita permissão negada)
           mkdir -p "$HOME/.local/bin"
           curl -fsSL -o "$HOME/.local/bin/yq" \
             https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_linux_amd64
           chmod +x "$HOME/.local/bin/yq"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-          # Atualiza a imagem do container principal do Deployment "customer-api"
+          # Atualiza o campo .spec.template.spec.containers[].image
           "$HOME/.local/bin/yq" -i '
             (. | select(.kind=="Deployment" and .metadata.name=="customer-api")
                .spec.template.spec.containers[]
                | select(.name=="customer-api")).image = strenv(IMG)
-          ' 20-deployment-service.yaml
+          ' k8s/20-deployment-service.yaml
 
           git config user.name  "ci-bot"
           git config user.email "ci-bot@users.noreply.github.com"
-          git add 20-deployment-service.yaml
+          git add k8s/20-deployment-service.yaml
           git commit -m "deploy: update image -> ${IMAGE}:${VERSION}"
           git push
 
