@@ -24,6 +24,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Java 21 + Maven cache
         uses: actions/setup-java@v4
@@ -43,39 +47,6 @@ jobs:
           VERSION=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version)
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Project version: $VERSION"
-          
-      - name: Update deployment image reference (early, tag legível)
-        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
-        env:
-          IMAGE:  ${{ steps.img.outputs.IMAGE }}
-          VERSION: ${{ steps.ver.outputs.VERSION }}
-        run: |
-          set -euo pipefail
-          IMG="${IMAGE}:${VERSION}"
-          echo "Atualizando imagem em k8s/20-deployment-service.yaml -> ${IMG}"
-
-          # yq local
-          mkdir -p "$HOME/.local/bin"
-          curl -fsSL -o "$HOME/.local/bin/yq" \
-            https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_linux_amd64
-          chmod +x "$HOME/.local/bin/yq"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-          # altera a imagem do container principal no Deployment customer-api
-          "$HOME/.local/bin/yq" -i '
-            (. | select(.kind=="Deployment" and .metadata.name=="customer-api")
-               .spec.template.spec.containers[]
-               | select(.name=="customer-api")).image = strenv(IMG)
-          ' k8s/20-deployment-service.yaml
-
-          # configura o remote para usar o GITHUB_TOKEN
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-
-          git add k8s/20-deployment-service.yaml
-          git commit -m "deploy: update image -> ${IMAGE}:${VERSION} [skip ci]"
-          git push
 
       - name: Decide image name
         id: img
@@ -88,6 +59,40 @@ jobs:
           fi
           echo "IMAGE=$IMAGE" >> "$GITHUB_OUTPUT"
           echo "Imagem alvo: $IMAGE"
+
+      - name: Update deployment image reference (early, tag legível)
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+        env:
+          IMAGE:   ${{ steps.img.outputs.IMAGE }}
+          VERSION: ${{ steps.ver.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${IMAGE}" ] || [ -z "${VERSION}" ]; then
+            echo "ERRO: IMAGE ou VERSION vazias."
+            exit 1
+          fi
+
+          IMG="${IMAGE}:${VERSION}"
+          echo "Atualizando imagem em k8s/20-deployment-service.yaml -> ${IMG}"
+
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o "$HOME/.local/bin/yq" \
+            https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_linux_amd64
+          chmod +x "$HOME/.local/bin/yq"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+          "$HOME/.local/bin/yq" -i '
+            (. | select(.kind=="Deployment" and .metadata.name=="customer-api")
+              .spec.template.spec.containers[]
+              | select(.name=="customer-api")).image = strenv(IMG)
+          ' k8s/20-deployment-service.yaml
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/20-deployment-service.yaml
+          git commit -m "deploy: update image -> ${IMAGE}:${VERSION} [skip ci]" || echo "Sem alterações para commitar."
+          git push
 
       # ===== BUILD NATIVO (UMA ÚNICA VEZ) =====
       - name: Build Quarkus Native (container-build)
