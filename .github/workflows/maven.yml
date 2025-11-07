@@ -108,7 +108,7 @@ jobs:
           # login (o --network host geralmente é desnecessário; remova-o)
           docker run --rm \
             quay.io/argoproj/argocd:${VER} \
-            argocd login "$ARGOCD_SERVER" --grpc-web --auth-token "$ARGOCD_TOKEN" --insecure
+            argocd login "$ARGOCD_SERVER" --grpc-web --auth-token "$ARGOCD_TOKEN"
 
           # refresh, sync e wait
           docker run --rm \
