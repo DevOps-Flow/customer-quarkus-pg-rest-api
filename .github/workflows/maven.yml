@@ -93,23 +93,33 @@ jobs:
             APP_VERSION=${{ steps.ver.outputs.VERSION }}
 
       # ===== ARGO CD: SYNC COM TOKEN DA CONTA ci =====
-      - name: Argo CD sync via containerized CLI (opcional)
+      - name: Argo CD via CLI em container
         env:
           VER: v2.12.3
           ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
           ARGOCD_TOKEN:  ${{ secrets.ARGOCD_TOKEN }}
           ARGOCD_APP:    ${{ secrets.ARGOCD_APP }}
         run: |
-          docker run --rm --network host \
-            quay.io/argoproj/argocd:$(echo $VER | sed 's/^v//') \
+          set -euo pipefail
+
+          # (opcional) puxe explicitamente para falhar cedo se a tag não existir
+          docker pull quay.io/argoproj/argocd:${VER}
+
+          # login (o --network host geralmente é desnecessário; remova-o)
+          docker run --rm \
+            quay.io/argoproj/argocd:${VER} \
             argocd login "$ARGOCD_SERVER" --grpc-web --auth-token "$ARGOCD_TOKEN" --insecure
-          docker run --rm --network host \
-            quay.io/argoproj/argocd:$(echo $VER | sed 's/^v//') \
+
+          # refresh, sync e wait
+          docker run --rm \
+            quay.io/argoproj/argocd:${VER} \
             argocd app get "$ARGOCD_APP" --refresh
-          docker run --rm --network host \
-            quay.io/argoproj/argocd:$(echo $VER | sed 's/^v//') \
+
+          docker run --rm \
+            quay.io/argoproj/argocd:${VER} \
             argocd app sync "$ARGOCD_APP" --prune --timeout 600
-          docker run --rm --network host \
-            quay.io/argoproj/argocd:$(echo $VER | sed 's/^v//') \
+
+          docker run --rm \
+            quay.io/argoproj/argocd:${VER} \
             argocd app wait "$ARGOCD_APP" --health --timeout 600
 
