@@ -93,13 +93,18 @@ jobs:
             APP_VERSION=${{ steps.ver.outputs.VERSION }}
 
       # ===== ARGO CD: SYNC COM TOKEN DA CONTA ci =====
-      - name: Install Argo CD CLI
+      - name: Install Argo CD CLI (no-root safe)
+        env:
+          VER: v2.12.3
         run: |
-          curl -sSL -o /usr/local/bin/argocd \
-            https://github.com/argoproj/argo-cd/releases/download/v2.12.3/argocd-linux-amd64
-          chmod +x /usr/local/bin/argocd
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o "$HOME/.local/bin/argocd" \
+            "https://github.com/argoproj/argo-cd/releases/download/${VER}/argocd-linux-amd64"
+          chmod +x "$HOME/.local/bin/argocd"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           argocd version --client
-
+          
       - name: Argo CD refresh & sync
         env:
           ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
