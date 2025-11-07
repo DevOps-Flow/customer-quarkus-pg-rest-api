@@ -130,10 +130,8 @@ jobs:
           build-args: |
             APP_VERSION=${{ steps.ver.outputs.VERSION }}
 
-
-
       # ===== ARGO CD: SYNC COM TOKEN DA CONTA ci =====
-      - name: Argo CD via CLI em container (sem login)
+      - name: Argo CD via CLI em container (sem login, fix)
         env:
           VER: v2.12.3
           ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
@@ -143,19 +141,33 @@ jobs:
           set -eo pipefail
           docker pull quay.io/argoproj/argocd:${VER}
 
-          # Refresh, sync e wait via token (sem login)
-          for CMD in \
-            "app get \"$ARGOCD_APP\" --refresh" \
-            "app sync \"$ARGOCD_APP\" --prune --timeout 600" \
-            "app wait \"$ARGOCD_APP\" --health --timeout 600"
-          do
-            echo "Executando: argocd $CMD"
-            docker run --rm \
-              -e ARGOCD_SERVER="$ARGOCD_SERVER" \
-              -e ARGOCD_TOKEN="$ARGOCD_TOKEN" \
-              -e ARGOCD_APP="$ARGOCD_APP" \
-              quay.io/argoproj/argocd:${VER} \
-              sh -lc "argocd --grpc-web --insecure \
-                --server \"\$ARGOCD_SERVER\" --auth-token \"\$ARGOCD_TOKEN\" \
-                \$CMD"
-          done
+          # app get --refresh
+          docker run --rm \
+            -e ARGOCD_SERVER="$ARGOCD_SERVER" \
+            -e ARGOCD_TOKEN="$ARGOCD_TOKEN" \
+            -e ARGOCD_APP="$ARGOCD_APP" \
+            quay.io/argoproj/argocd:${VER} \
+            sh -lc 'argocd --grpc-web --insecure \
+              --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_TOKEN" \
+              app get "$ARGOCD_APP" --refresh'
+
+          # app sync
+          docker run --rm \
+            -e ARGOCD_SERVER="$ARGOCD_SERVER" \
+            -e ARGOCD_TOKEN="$ARGOCD_TOKEN" \
+            -e ARGOCD_APP="$ARGOCD_APP" \
+            quay.io/argoproj/argocd:${VER} \
+            sh -lc 'argocd --grpc-web --insecure \
+              --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_TOKEN" \
+              app sync "$ARGOCD_APP" --prune --timeout 600'
+
+          # app wait --health
+          docker run --rm \
+            -e ARGOCD_SERVER="$ARGOCD_SERVER" \
+            -e ARGOCD_TOKEN="$ARGOCD_TOKEN" \
+            -e ARGOCD_APP="$ARGOCD_APP" \
+            quay.io/argoproj/argocd:${VER} \
+            sh -lc 'argocd --grpc-web --insecure \
+              --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_TOKEN" \
+              app wait "$ARGOCD_APP" --health --timeout 600'
+
