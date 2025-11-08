@@ -46,25 +46,37 @@ jobs:
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Project version: $VERSION"
 
-      - name: Decide image name (replicando lógica testada)
+      - name: Decide image name (robusto + validação)
         id: img
         env:
           REPO_NAME: ${{ github.event.repository.name }}
+          IMAGE_INPUT: ${{ env.DOCKER_IMAGE }}                # repo var (pode vir vazia)
+          DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}   # precisa estar configurado
         run: |
-          # 1) Se DOCKER_IMAGE (repo var) existir e não for "null", usa ela
-          if [ -n "${{ env.DOCKER_IMAGE }}" ] && [ "${{ env.DOCKER_IMAGE }}" != "null" ]; then
-            IMAGE="${{ env.DOCKER_IMAGE }}"
+          set -euo pipefail
+
+          # 1) Prioriza DOCKER_IMAGE (repo var) se vier preenchida
+          if [ -n "${IMAGE_INPUT:-}" ]; then
+            IMAGE="$IMAGE_INPUT"
+          # 2) Caso contrário, usa <dockerhub_username>/<repo>
+          elif [ -n "${DOCKERHUB_USER:-}" ]; then
+            IMAGE="${DOCKERHUB_USER}/${REPO_NAME}"
           else
-            # 2) Caso contrário, usa <dockerhub_username>/<repo>
-            if [ -z "${{ secrets.DOCKERHUB_USERNAME }}" ]; then
-              echo "ERRO: secrets.DOCKERHUB_USERNAME não está definido e DOCKER_IMAGE também não."
-              exit 1
-            fi
-            IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/${REPO_NAME}"
+            echo "ERRO: Nome da imagem vazio."
+            echo "Defina a repo variable DOCKER_IMAGE (ex.: meuuser/minhaimg) OU o secret DOCKERHUB_USERNAME."
+            exit 1
+          fi
+
+          # 3) Valida formato docker (simples e suficiente para evitar ':tag' sem repo)
+          if ! echo "$IMAGE" | grep -Eq '^[a-z0-9]+([._-][a-z0-9]+)*/[a-z0-9]+([._-][a-z0-9]+)*$'; then
+            echo "ERRO: Nome de imagem inválido: '$IMAGE'"
+            echo "Use algo como 'usuario/repo' (somente minúsculas, dígitos, '.', '_', '-')."
+            exit 1
           fi
 
           echo "IMAGE=$IMAGE" >> "$GITHUB_OUTPUT"
-          echo "Imagem alvo: $IMAGE"
+          echo "Imagem alvo resolvida: $IMAGE"
+
 
   build_native:
     name: Build • Quarkus Native
@@ -127,6 +139,14 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Sanity • Conferir IMAGE e VERSION
+        run: |
+          set -euo pipefail
+          echo "IMAGE='${{ needs.meta.outputs.IMAGE }}'"
+          echo "VERSION='${{ needs.meta.outputs.VERSION }}'"
+          test -n "${{ needs.meta.outputs.IMAGE }}"   || (echo "IMAGE vazio" && exit 1)
+          test -n "${{ needs.meta.outputs.VERSION }}" || (echo "VERSION vazia" && exit 1)
+      
       - name: Build & Push image (version + latest)
         id: dkr
         uses: docker/build-push-action@v6
@@ -141,6 +161,14 @@ jobs:
             APP_VERSION=${{ needs.meta.outputs.VERSION }}
           cache-from: type=registry,ref=${{ needs.meta.outputs.IMAGE }}:buildcache
           cache-to:   type=registry,ref=${{ needs.meta.outputs.IMAGE }}:buildcache,mode=max
+      
+      - name: Sanity • Conferir tags construídas
+        run: |
+          set -euo pipefail
+          echo "Tags esperadas:"
+          echo "  ${{ needs.meta.outputs.IMAGE }}:${{ needs.meta.outputs.VERSION }}"
+          echo "  ${{ needs.meta.outputs.IMAGE }}:latest"
+
 
   update_manifest:
     name: GitOps • Atualizar imagem no manifesto
