@@ -143,8 +143,10 @@ jobs:
           build-args: |
             APP_VERSION=${{ steps.ver.outputs.VERSION }}
 
-      # ===== ARGO CD: SYNC COM TOKEN DA CONTA ci =====
-      - name: Argo CD via CLI em container (sem login, fix)
+      # 1) Tenta sincronizar (se falhar, o job continua e o próximo step faz rollback)
+      - name: Argo CD sync (pode falhar)
+        id: argocd-sync
+        continue-on-error: true
         env:
           VER: v2.12.3
           ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
@@ -154,33 +156,69 @@ jobs:
           set -eo pipefail
           docker pull quay.io/argoproj/argocd:${VER}
 
-          # app get --refresh
+          # refresh
           docker run --rm \
-            -e ARGOCD_SERVER="$ARGOCD_SERVER" \
-            -e ARGOCD_TOKEN="$ARGOCD_TOKEN" \
-            -e ARGOCD_APP="$ARGOCD_APP" \
+            -e ARGOCD_SERVER="$ARGOCD_SERVER" -e ARGOCD_TOKEN="$ARGOCD_TOKEN" -e ARGOCD_APP="$ARGOCD_APP" \
             quay.io/argoproj/argocd:${VER} \
-            sh -lc 'argocd --grpc-web --insecure \
-              --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_TOKEN" \
-              app get "$ARGOCD_APP" --refresh'
+            sh -lc 'argocd --grpc-web --insecure --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_TOKEN" app get "$ARGOCD_APP" --refresh'
 
-          # app sync
+          # sync (este é o que normalmente falha quando algo deu errado no deploy)
           docker run --rm \
-            -e ARGOCD_SERVER="$ARGOCD_SERVER" \
-            -e ARGOCD_TOKEN="$ARGOCD_TOKEN" \
-            -e ARGOCD_APP="$ARGOCD_APP" \
+            -e ARGOCD_SERVER="$ARGOCD_SERVER" -e ARGOCD_TOKEN="$ARGOCD_TOKEN" -e ARGOCD_APP="$ARGOCD_APP" \
             quay.io/argoproj/argocd:${VER} \
-            sh -lc 'argocd --grpc-web --insecure \
-              --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_TOKEN" \
-              app sync "$ARGOCD_APP" --prune --timeout 600'
+            sh -lc 'argocd --grpc-web --insecure --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_TOKEN" app sync "$ARGOCD_APP" --prune --timeout 600'
 
-          # app wait --health
+          # wait
           docker run --rm \
-            -e ARGOCD_SERVER="$ARGOCD_SERVER" \
-            -e ARGOCD_TOKEN="$ARGOCD_TOKEN" \
-            -e ARGOCD_APP="$ARGOCD_APP" \
+            -e ARGOCD_SERVER="$ARGOCD_SERVER" -e ARGOCD_TOKEN="$ARGOCD_TOKEN" -e ARGOCD_APP="$ARGOCD_APP" \
             quay.io/argoproj/argocd:${VER} \
-            sh -lc 'argocd --grpc-web --insecure \
-              --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_TOKEN" \
-              app wait "$ARGOCD_APP" --health --timeout 600'
+            sh -lc 'argocd --grpc-web --insecure --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_TOKEN" app wait "$ARGOCD_APP" --health --timeout 600'
 
+      # 2) Rollback automático se o passo anterior falhar
+      - name: Rollback on failure (git revert + Argo CD sync)
+        if: steps.argocd-sync.outcome == 'failure'
+        env:
+          VER: v2.12.3
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_TOKEN:  ${{ secrets.ARGOCD_TOKEN }}
+          ARGOCD_APP:    ${{ secrets.ARGOCD_APP }}
+        run: |
+          set -euo pipefail
+
+          echo "⚠️ Deploy falhou — iniciando rollback GitOps…"
+
+          # Garante histórico atualizado
+          git fetch origin master
+          git checkout master
+          git pull --rebase origin master
+
+          # Encontra o último commit de bump de imagem e reverte
+          LAST_BUMP=$(git log --grep='^deploy: update image -> ' -n 1 --pretty=format:%H || true)
+          if [ -z "${LAST_BUMP}" ]; then
+            echo "ERRO: não encontrei commit de bump (deploy: update image -> ...). Abortando rollback."
+            exit 1
+          fi
+
+          echo "Revertendo commit ${LAST_BUMP}…"
+          git revert --no-edit "${LAST_BUMP}"
+          git push
+
+          # Sincroniza o ArgoCD para aplicar o rollback
+          docker pull quay.io/argoproj/argocd:${VER}
+
+          docker run --rm \
+            -e ARGOCD_SERVER="$ARGOCD_SERVER" -e ARGOCD_TOKEN="$ARGOCD_TOKEN" -e ARGOCD_APP="$ARGOCD_APP" \
+            quay.io/argoproj/argocd:${VER} \
+            sh -lc 'argocd --grpc-web --insecure --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_TOKEN" app get "$ARGOCD_APP" --refresh'
+
+          docker run --rm \
+            -e ARGOCD_SERVER="$ARGOCD_SERVER" -e ARGOCD_TOKEN="$ARGOCD_TOKEN" -e ARGOCD_APP="$ARGOCD_APP" \
+            quay.io/argoproj/argocd:${VER} \
+            sh -lc 'argocd --grpc-web --insecure --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_TOKEN" app sync "$ARGOCD_APP" --timeout 600'
+
+          docker run --rm \
+            -e ARGOCD_SERVER="$ARGOCD_SERVER" -e ARGOCD_TOKEN="$ARGOCD_TOKEN" -e ARGOCD_APP="$ARGOCD_APP" \
+            quay.io/argoproj/argocd:${VER} \
+            sh -lc 'argocd --grpc-web --insecure --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_TOKEN" app wait "$ARGOCD_APP" --health --timeout 600'
+
+          echo "✅ Rollback concluído com sucesso."
