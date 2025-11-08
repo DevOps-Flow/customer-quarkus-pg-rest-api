@@ -236,6 +236,7 @@ jobs:
           set -euo pipefail
           IMG="${IMAGE}:${VERSION}"
           echo "Atualizando imagem em k8s/20-deployment-service.yaml -> ${IMG}"
+          export IMG  # <<< o pulo do gato
 
           mkdir -p "$HOME/.local/bin"
           curl -fsSL -o "$HOME/.local/bin/yq" \
@@ -265,6 +266,7 @@ jobs:
           git fetch origin master
           git pull --rebase origin master
           git push
+
 
   argocd_sync:
     name: Argo CD • Sync + Wait (com rollback)
