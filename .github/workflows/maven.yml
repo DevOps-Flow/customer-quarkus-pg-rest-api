@@ -1,4 +1,4 @@
-name: Release Native • Multi-jobs (Build, Image, Push & ArgoCD Sync + Rollback)
+name: Release Native + Deploy with Argo CD e Rollback
 
 on:
   push:
@@ -14,12 +14,11 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Mantida como no pipeline original (repo variable). Ex.: ivanc/customer-quarkus-pg-rest-api
   DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE }}
 
 jobs:
   meta:
-    name: Meta • Versão e nome da imagem
+    name: Meta
     runs-on: ubuntu-latest
     outputs:
       VERSION: ${{ steps.ver.outputs.VERSION }}
@@ -46,13 +45,12 @@ jobs:
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Project version: $VERSION"
 
-      # Mantém a lógica já validada: usa DOCKER_IMAGE (repo var) se existir; caso contrário, <dockerhub_username>/<repo>
-      - name: Decide image name (robusto + validação)
+      - name: Decide Docker Image Name 
         id: img
         env:
           REPO_NAME: ${{ github.event.repository.name }}
-          IMAGE_INPUT: ${{ env.DOCKER_IMAGE }}                # repo var (pode vir vazia)
-          DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}   # precisa estar configurado
+          IMAGE_INPUT: ${{ env.DOCKER_IMAGE }}                
+          DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}   
         run: |
           set -euo pipefail
 
@@ -61,20 +59,20 @@ jobs:
           elif [ -n "${DOCKERHUB_USER:-}" ]; then
             IMAGE="${DOCKERHUB_USER}/${REPO_NAME}"
           else
-            echo "ERRO: Nome da imagem vazio."
-            echo "Defina a repo variable DOCKER_IMAGE (ex.: meuuser/minhaimg) OU o secret DOCKERHUB_USERNAME."
+            echo "ERROR: Image name empty."
+            echo "Define a repo variable DOCKER_IMAGE (ex.: meuuser/minhaimg) or in secret DOCKERHUB_USERNAME."
             exit 1
           fi
 
-          # valida formato docker simples (evita ':tag' sem repo)
+          # Simple check docker format (avoid ':tag' without repo)
           if ! echo "$IMAGE" | grep -Eq '^[a-z0-9]+([._-][a-z0-9]+)*/[a-z0-9]+([._-][a-z0-9]+)*$'; then
-            echo "ERRO: Nome de imagem inválido: '$IMAGE'"
-            echo "Use algo como 'usuario/repo' (somente minúsculas, dígitos, '.', '_', '-')."
+            echo "ERROR: Image name invalid: '$IMAGE'"
+            echo "Use something like 'user/repo' (only with somente lowercases, digits, '.', '_', '-')."
             exit 1
           fi
 
           echo "IMAGE=$IMAGE" >> "$GITHUB_OUTPUT"
-          echo "Imagem alvo resolvida: $IMAGE"
+          echo "Target image resolved: $IMAGE"
 
   build_native:
     name: Build • Quarkus Native
@@ -102,7 +100,6 @@ jobs:
         with:
           maven-version: 3.9.9
 
-      # ===== BUILD NATIVO (UMA ÚNICA VEZ) =====
       - name: Build Quarkus Native (container-build)
         run: mvn -B -ntp package -Pnative -Dquarkus.native.container-build=true
 
@@ -114,7 +111,7 @@ jobs:
           if-no-files-found: error
 
   image:
-    name: Docker • Build & Push (com cache remoto)
+    name: Docker Image • Build & Push
     runs-on: ubuntu-latest
     needs: [build_native, meta]
     steps:
@@ -138,8 +135,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Fallback local: mesmo que o job meta não exporte, resolvemos IMAGE aqui
-      - name: Resolve IMAGE efetivo (fallback robusto)
+      - name: Resolve IMAGE
         id: eff
         env:
           META_IMAGE: ${{ needs.meta.outputs.IMAGE }}
@@ -157,24 +153,24 @@ jobs:
             fi
           fi
           if [ -z "${IMAGE}" ]; then
-            echo "ERRO: IMAGE efetivo vazio. Defina vars.DOCKER_IMAGE ou DOCKERHUB_USERNAME."
+            echo "ERROR: IMAGE empty. Define vars.DOCKER_IMAGE or DOCKERHUB_USERNAME."
             exit 1
           fi
-          # valida formato simples
+          # Check simple format
           if ! echo "$IMAGE" | grep -Eq '^[a-z0-9]+([._-][a-z0-9]+)*/[a-z0-9]+([._-][a-z0-9]+)*$'; then
-            echo "ERRO: Nome de imagem inválido: '$IMAGE'"
+            echo "ERROR: Invalid image name: '$IMAGE'"
             exit 1
           fi
           echo "IMAGE=${IMAGE}" >> "$GITHUB_OUTPUT"
           echo "IMAGE efetivo: ${IMAGE}"
 
-      - name: Sanity • Conferir IMAGE e VERSION
+      - name: Sanity • Check IMAGE and VERSION
         run: |
           set -euo pipefail
           echo "IMAGE='${{ steps.eff.outputs.IMAGE }}'"
           echo "VERSION='${{ needs.meta.outputs.VERSION }}'"
-          test -n "${{ steps.eff.outputs.IMAGE }}"   || (echo "IMAGE vazio" && exit 1)
-          test -n "${{ needs.meta.outputs.VERSION }}" || (echo "VERSION vazia" && exit 1)
+          test -n "${{ steps.eff.outputs.IMAGE }}"   || (echo "IMAGE empty" && exit 1)
+          test -n "${{ needs.meta.outputs.VERSION }}" || (echo "VERSION empty" && exit 1)
 
       - name: Build & Push image (version + latest)
         id: dkr
@@ -192,15 +188,14 @@ jobs:
           cache-to:   type=registry,ref=${{ steps.eff.outputs.IMAGE }}:buildcache,mode=max
 
   update_manifest:
-    name: GitOps • Atualizar imagem no manifesto
+    name: GitOps • Update Docker Image Name in deploy manifest
     runs-on: ubuntu-latest
     needs: [image, meta]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     steps:
       - uses: actions/checkout@v4
 
-      # Mesmo fallback local para garantir IMAGE
-      - name: Resolve IMAGE efetivo (fallback robusto)
+      - name: Resolve IMAGE
         id: eff
         env:
           META_IMAGE: ${{ needs.meta.outputs.IMAGE }}
@@ -218,25 +213,25 @@ jobs:
             fi
           fi
           if [ -z "${IMAGE}" ]; then
-            echo "ERRO: IMAGE efetivo vazio para update_manifest."
+            echo "ERROR: Empty IMAGE to update_manifest."
             exit 1
           fi
           if ! echo "$IMAGE" | grep -Eq '^[a-z0-9]+([._-][a-z0-9]+)*/[a-z0-9]+([._-][a-z0-9]+)*$'; then
-            echo "ERRO: Nome de imagem inválido: '$IMAGE'"
+            echo "ERROR: Invalid image name: '$IMAGE'"
             exit 1
           fi
           echo "IMAGE=${IMAGE}" >> "$GITHUB_OUTPUT"
-          echo "IMAGE efetivo: ${IMAGE}"
+          echo "IMAGE: ${IMAGE}"
 
-      - name: Update deployment image reference (yq)
+      - name: Update deployment image reference
         env:
           IMAGE:   ${{ steps.eff.outputs.IMAGE }}
           VERSION: ${{ needs.meta.outputs.VERSION }}
         run: |
           set -euo pipefail
           IMG="${IMAGE}:${VERSION}"
-          echo "Atualizando imagem em k8s/20-deployment-service.yaml -> ${IMG}"
-          export IMG  # <<< o pulo do gato
+          echo "Updating image in k8s/20-deployment-service.yaml -> ${IMG}"
+          export IMG  
 
           mkdir -p "$HOME/.local/bin"
           curl -fsSL -o "$HOME/.local/bin/yq" \
@@ -257,19 +252,19 @@ jobs:
           ' k8s/20-deployment-service.yaml)
 
           test -n "${NEW_IMAGE}" || (echo "ERRO: imagem vazia após yq." && exit 1)
-          echo "Imagem final no manifesto: ${NEW_IMAGE}"
+          echo "Final image in manifest: ${NEW_IMAGE}"
 
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add k8s/20-deployment-service.yaml
-          git commit -m "deploy: update image -> ${IMG} [skip ci]" || echo "Sem alterações para commitar."
+          git commit -m "deploy: update image -> ${IMG} [skip ci]" || echo "No changes to commit."
           git fetch origin master
           git pull --rebase origin master
           git push
 
 
   argocd_sync:
-    name: Argo CD • Sync + Wait (com rollback)
+    name: Argo CD • Sync + Wait (with rollback)
     runs-on: ubuntu-latest
     needs: [image, update_manifest]
     env:
@@ -277,20 +272,20 @@ jobs:
       ARGOCD_TOKEN:  ${{ secrets.ARGOCD_TOKEN }}
       ARGOCD_APP:    ${{ secrets.ARGOCD_APP }}
     steps:
-      - name: Verificar vars do ArgoCD
+      - name: Check vars from ArgoCD
         run: |
           test -n "${ARGOCD_SERVER}" || (echo "ARGOCD_SERVER não definido" && exit 1)
           test -n "${ARGOCD_TOKEN}"  || (echo "ARGOCD_TOKEN não definido" && exit 1)
           test -n "${ARGOCD_APP}"    || (echo "ARGOCD_APP não definido" && exit 1)
 
-      - name: Argo CD sync (pode falhar)
+      - name: Argo CD sync
         id: argocd-sync
         continue-on-error: true
         env:
           VER: v2.13.3
         run: |
           set -euo pipefail
-          echo "Iniciando sincronização do ArgoCD…"
+          echo "Starting sincronization from ArgoCD…"
           docker run --rm \
             -e ARGOCD_SERVER="$ARGOCD_SERVER" -e ARGOCD_TOKEN="$ARGOCD_TOKEN" -e ARGOCD_APP="$ARGOCD_APP" \
             quay.io/argoproj/argocd:${VER} \
@@ -312,7 +307,7 @@ jobs:
           VER: v2.12.3
         run: |
           set -euo pipefail
-          echo "⚠️ Deploy falhou — iniciando rollback GitOps…"
+          echo "⚠️ Deploy failed — starting rollback GitOps…"
 
           git fetch origin master
           git checkout master
@@ -323,7 +318,7 @@ jobs:
           git revert --no-edit "${LAST_COMMIT}" || true
           git push
 
-          echo "Sincronizando Argo CD para aplicar o rollback…"
+          echo "Synchronizing Argo CD to apply rollback…"
           docker run --rm \
             -e ARGOCD_SERVER="$ARGOCD_SERVER" -e ARGOCD_TOKEN="$ARGOCD_TOKEN" -e ARGOCD_APP="$ARGOCD_APP" \
             quay.io/argoproj/argocd:${VER} \
@@ -339,4 +334,4 @@ jobs:
             quay.io/argoproj/argocd:${VER} \
             sh -lc 'argocd --grpc-web --insecure --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_TOKEN" app wait "$ARGOCD_APP" --health --timeout 600'
 
-          echo "✅ Rollback concluído com sucesso."
+          echo "✅ Rollback succeed."
