@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Mantida como no pipeline original (repo variable)
+  # Mantida como no pipeline original (repo variable). Ex.: ivanc/customer-quarkus-pg-rest-api
   DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE }}
 
 jobs:
@@ -46,6 +46,7 @@ jobs:
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Project version: $VERSION"
 
+      # Mantém a lógica já validada: usa DOCKER_IMAGE (repo var) se existir; caso contrário, <dockerhub_username>/<repo>
       - name: Decide image name (robusto + validação)
         id: img
         env:
@@ -55,10 +56,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 1) Prioriza DOCKER_IMAGE (repo var) se vier preenchida
           if [ -n "${IMAGE_INPUT:-}" ]; then
             IMAGE="$IMAGE_INPUT"
-          # 2) Caso contrário, usa <dockerhub_username>/<repo>
           elif [ -n "${DOCKERHUB_USER:-}" ]; then
             IMAGE="${DOCKERHUB_USER}/${REPO_NAME}"
           else
@@ -67,7 +66,7 @@ jobs:
             exit 1
           fi
 
-          # 3) Valida formato docker (simples e suficiente para evitar ':tag' sem repo)
+          # valida formato docker simples (evita ':tag' sem repo)
           if ! echo "$IMAGE" | grep -Eq '^[a-z0-9]+([._-][a-z0-9]+)*/[a-z0-9]+([._-][a-z0-9]+)*$'; then
             echo "ERRO: Nome de imagem inválido: '$IMAGE'"
             echo "Use algo como 'usuario/repo' (somente minúsculas, dígitos, '.', '_', '-')."
@@ -76,7 +75,6 @@ jobs:
 
           echo "IMAGE=$IMAGE" >> "$GITHUB_OUTPUT"
           echo "Imagem alvo resolvida: $IMAGE"
-
 
   build_native:
     name: Build • Quarkus Native
@@ -104,6 +102,7 @@ jobs:
         with:
           maven-version: 3.9.9
 
+      # ===== BUILD NATIVO (UMA ÚNICA VEZ) =====
       - name: Build Quarkus Native (container-build)
         run: mvn -B -ntp package -Pnative -Dquarkus.native.container-build=true
 
@@ -139,14 +138,44 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # Fallback local: mesmo que o job meta não exporte, resolvemos IMAGE aqui
+      - name: Resolve IMAGE efetivo (fallback robusto)
+        id: eff
+        env:
+          META_IMAGE: ${{ needs.meta.outputs.IMAGE }}
+          VAR_IMAGE: ${{ env.DOCKER_IMAGE }}
+          DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          set -euo pipefail
+          IMAGE="${META_IMAGE:-}"
+          if [ -z "${IMAGE}" ]; then
+            if [ -n "${VAR_IMAGE:-}" ]; then
+              IMAGE="${VAR_IMAGE}"
+            elif [ -n "${DOCKERHUB_USER:-}" ]; then
+              IMAGE="${DOCKERHUB_USER}/${REPO_NAME}"
+            fi
+          fi
+          if [ -z "${IMAGE}" ]; then
+            echo "ERRO: IMAGE efetivo vazio. Defina vars.DOCKER_IMAGE ou DOCKERHUB_USERNAME."
+            exit 1
+          fi
+          # valida formato simples
+          if ! echo "$IMAGE" | grep -Eq '^[a-z0-9]+([._-][a-z0-9]+)*/[a-z0-9]+([._-][a-z0-9]+)*$'; then
+            echo "ERRO: Nome de imagem inválido: '$IMAGE'"
+            exit 1
+          fi
+          echo "IMAGE=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "IMAGE efetivo: ${IMAGE}"
+
       - name: Sanity • Conferir IMAGE e VERSION
         run: |
           set -euo pipefail
-          echo "IMAGE='${{ needs.meta.outputs.IMAGE }}'"
+          echo "IMAGE='${{ steps.eff.outputs.IMAGE }}'"
           echo "VERSION='${{ needs.meta.outputs.VERSION }}'"
-          test -n "${{ needs.meta.outputs.IMAGE }}"   || (echo "IMAGE vazio" && exit 1)
+          test -n "${{ steps.eff.outputs.IMAGE }}"   || (echo "IMAGE vazio" && exit 1)
           test -n "${{ needs.meta.outputs.VERSION }}" || (echo "VERSION vazia" && exit 1)
-      
+
       - name: Build & Push image (version + latest)
         id: dkr
         uses: docker/build-push-action@v6
@@ -155,20 +184,12 @@ jobs:
           file: ./Dockerfile.native
           push: true
           tags: |
-            ${{ needs.meta.outputs.IMAGE }}:${{ needs.meta.outputs.VERSION }}
-            ${{ needs.meta.outputs.IMAGE }}:latest
+            ${{ steps.eff.outputs.IMAGE }}:${{ needs.meta.outputs.VERSION }}
+            ${{ steps.eff.outputs.IMAGE }}:latest
           build-args: |
             APP_VERSION=${{ needs.meta.outputs.VERSION }}
-          cache-from: type=registry,ref=${{ needs.meta.outputs.IMAGE }}:buildcache
-          cache-to:   type=registry,ref=${{ needs.meta.outputs.IMAGE }}:buildcache,mode=max
-      
-      - name: Sanity • Conferir tags construídas
-        run: |
-          set -euo pipefail
-          echo "Tags esperadas:"
-          echo "  ${{ needs.meta.outputs.IMAGE }}:${{ needs.meta.outputs.VERSION }}"
-          echo "  ${{ needs.meta.outputs.IMAGE }}:latest"
-
+          cache-from: type=registry,ref=${{ steps.eff.outputs.IMAGE }}:buildcache
+          cache-to:   type=registry,ref=${{ steps.eff.outputs.IMAGE }}:buildcache,mode=max
 
   update_manifest:
     name: GitOps • Atualizar imagem no manifesto
@@ -178,9 +199,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Mesmo fallback local para garantir IMAGE
+      - name: Resolve IMAGE efetivo (fallback robusto)
+        id: eff
+        env:
+          META_IMAGE: ${{ needs.meta.outputs.IMAGE }}
+          VAR_IMAGE: ${{ env.DOCKER_IMAGE }}
+          DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          set -euo pipefail
+          IMAGE="${META_IMAGE:-}"
+          if [ -z "${IMAGE}" ]; then
+            if [ -n "${VAR_IMAGE:-}" ]; then
+              IMAGE="${VAR_IMAGE}"
+            elif [ -n "${DOCKERHUB_USER:-}" ]; then
+              IMAGE="${DOCKERHUB_USER}/${REPO_NAME}"
+            fi
+          fi
+          if [ -z "${IMAGE}" ]; then
+            echo "ERRO: IMAGE efetivo vazio para update_manifest."
+            exit 1
+          fi
+          if ! echo "$IMAGE" | grep -Eq '^[a-z0-9]+([._-][a-z0-9]+)*/[a-z0-9]+([._-][a-z0-9]+)*$'; then
+            echo "ERRO: Nome de imagem inválido: '$IMAGE'"
+            exit 1
+          fi
+          echo "IMAGE=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "IMAGE efetivo: ${IMAGE}"
+
       - name: Update deployment image reference (yq)
         env:
-          IMAGE:   ${{ needs.meta.outputs.IMAGE }}
+          IMAGE:   ${{ steps.eff.outputs.IMAGE }}
           VERSION: ${{ needs.meta.outputs.VERSION }}
         run: |
           set -euo pipefail
