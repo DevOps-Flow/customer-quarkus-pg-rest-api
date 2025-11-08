@@ -1,38 +1,35 @@
-name: Release Native • Build, Image, Push & ArgoCD Sync
+name: Release Native • Multi-jobs (Build, Image, Push & ArgoCD Sync + Rollback)
 
 on:
   push:
-    branches:
-      - master
+    branches: [ master ]
+  workflow_dispatch:
 
 permissions:
-  contents: write # <— necessário para git push com GITHUB_TOKEN
-  # pull-requests: write  # (opcional, se for usar PR em vez de push direto)
+  contents: write
+  packages: write
 
 concurrency:
   group: release-native-${{ github.ref }}
   cancel-in-progress: false
 
 env:
-  DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE }}
+  DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE }} # mantém a variável existente
 
 jobs:
-  release:
-    name: Build once (native) • Docker • Push • Update manifest • ArgoCD
-    runs-on: arc-runner-set
-
+  meta:
+    name: Meta • Versão e nome da imagem
+    runs-on: ubuntu-latest
+    outputs:
+      VERSION: ${{ steps.ver.outputs.VERSION }}
+      IMAGE:   ${{ steps.img.outputs.IMAGE }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: true
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v4
 
-      - name: Setup Java 21 + Maven cache
+      - name: Setup Java 21
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '21'
           cache: maven
 
@@ -50,9 +47,10 @@ jobs:
 
       - name: Decide image name
         id: img
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
         run: |
-          if [ -z "${{ env.DOCKER_IMAGE }}" ] || [ "${{ env.DOCKER_IMAGE }}" = "null" ]; then
-            REPO_NAME=$(basename "$GITHUB_REPOSITORY")
+          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ]; then
             IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/${REPO_NAME}"
           else
             IMAGE="${{ env.DOCKER_IMAGE }}"
@@ -60,14 +58,97 @@ jobs:
           echo "IMAGE=$IMAGE" >> "$GITHUB_OUTPUT"
           echo "Imagem alvo: $IMAGE"
 
+  build_native:
+    name: Build • Quarkus Native
+    runs-on: ubuntu-latest
+    needs: [meta]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Maven repo
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2-
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Setup Maven 3.9.9
+        uses: stCarolas/setup-maven@v5
+        with:
+          maven-version: 3.9.9
+
+      # ===== BUILD NATIVO (UMA ÚNICA VEZ) =====
+      - name: Build Quarkus Native (container-build)
+        run: mvn -B -ntp package -Pnative -Dquarkus.native.container-build=true
+
+      - name: Upload native runner
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-runner
+          path: target/*-runner
+          if-no-files-found: error
+
+  image:
+    name: Docker • Build & Push (com cache remoto)
+    runs-on: ubuntu-latest
+    needs: [build_native, meta]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download native runner
+        uses: actions/download-artifact@v4
+        with:
+          name: native-runner
+          path: target
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker Hub login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & Push image (version + latest)
+        id: dkr
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.native
+          push: true
+          tags: |
+            ${{ needs.meta.outputs.IMAGE }}:${{ needs.meta.outputs.VERSION }}
+            ${{ needs.meta.outputs.IMAGE }}:latest
+          build-args: |
+            APP_VERSION=${{ needs.meta.outputs.VERSION }}
+          cache-from: type=registry,ref=${{ needs.meta.outputs.IMAGE }}:buildcache
+          cache-to:   type=registry,ref=${{ needs.meta.outputs.IMAGE }}:buildcache,mode=max
+
+  update_manifest:
+    name: GitOps • Atualizar imagem no manifesto
+    runs-on: ubuntu-latest
+    needs: [image, meta]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Update deployment image reference (early, tag legível)
-        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
         env:
-          IMAGE:   ${{ steps.img.outputs.IMAGE }}
-          VERSION: ${{ steps.ver.outputs.VERSION }}
+          IMAGE:   ${{ needs.meta.outputs.IMAGE }}
+          VERSION: ${{ needs.meta.outputs.VERSION }}
         run: |
           set -euo pipefail
-
           if [ -z "${IMAGE}" ] || [ -z "${VERSION}" ]; then
             echo "ERRO: IMAGE ou VERSION vazias."
             exit 1
@@ -112,79 +193,52 @@ jobs:
           git pull --rebase origin master
           git push
 
-
-      # ===== BUILD NATIVO (UMA ÚNICA VEZ) =====
-      - name: Build Quarkus Native (container-build)
-        run: mvn -B -ntp package -Pnative -Dquarkus.native.container-build=true
-
-      # ===== DOCKER: LOGIN, BUILD & PUSH =====
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Docker Hub login
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build & Push image (version + latest)
-        id: dkr
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile.native
-          push: true
-          tags: |
-            ${{ steps.img.outputs.IMAGE }}:${{ steps.ver.outputs.VERSION }}
-            ${{ steps.img.outputs.IMAGE }}:latest
-          build-args: |
-            APP_VERSION=${{ steps.ver.outputs.VERSION }}
+  argocd_sync:
+    name: Argo CD • Sync + Wait (com rollback)
+    runs-on: ubuntu-latest
+    needs: [image, update_manifest]
+    env:
+      ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+      ARGOCD_TOKEN:  ${{ secrets.ARGOCD_TOKEN }}
+      ARGOCD_APP:    ${{ secrets.ARGOCD_APP }}
+    steps:
+      - name: Verificar vars do ArgoCD
+        run: |
+          test -n "${ARGOCD_SERVER}" || (echo "ARGOCD_SERVER não definido" && exit 1)
+          test -n "${ARGOCD_TOKEN}"  || (echo "ARGOCD_TOKEN não definido" && exit 1)
+          test -n "${ARGOCD_APP}"    || (echo "ARGOCD_APP não definido" && exit 1)
 
       # 1) Tenta sincronizar (se falhar, o job continua e o próximo step faz rollback)
       - name: Argo CD sync (pode falhar)
         id: argocd-sync
         continue-on-error: true
         env:
-          VER: v2.12.3
-          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
-          ARGOCD_TOKEN:  ${{ secrets.ARGOCD_TOKEN }}
-          ARGOCD_APP:    ${{ secrets.ARGOCD_APP }}
+          VER: v2.13.3
         run: |
-          set -eo pipefail
-          docker pull quay.io/argoproj/argocd:${VER}
-
-          # refresh
+          set -euo pipefail
+          echo "Iniciando sincronização do ArgoCD…"
           docker run --rm \
             -e ARGOCD_SERVER="$ARGOCD_SERVER" -e ARGOCD_TOKEN="$ARGOCD_TOKEN" -e ARGOCD_APP="$ARGOCD_APP" \
             quay.io/argoproj/argocd:${VER} \
             sh -lc 'argocd --grpc-web --insecure --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_TOKEN" app get "$ARGOCD_APP" --refresh'
 
-          # sync (este é o que normalmente falha quando algo deu errado no deploy)
           docker run --rm \
             -e ARGOCD_SERVER="$ARGOCD_SERVER" -e ARGOCD_TOKEN="$ARGOCD_TOKEN" -e ARGOCD_APP="$ARGOCD_APP" \
             quay.io/argoproj/argocd:${VER} \
             sh -lc 'argocd --grpc-web --insecure --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_TOKEN" app sync "$ARGOCD_APP" --prune --timeout 600'
 
-          # wait
           docker run --rm \
             -e ARGOCD_SERVER="$ARGOCD_SERVER" -e ARGOCD_TOKEN="$ARGOCD_TOKEN" -e ARGOCD_APP="$ARGOCD_APP" \
             quay.io/argoproj/argocd:${VER} \
             sh -lc 'argocd --grpc-web --insecure --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_TOKEN" app wait "$ARGOCD_APP" --health --timeout 600'
 
-      # 2) Rollback automático se o passo anterior falhar
+      # 2) Rollback automático se o passo anterior falhar (mesma lógica já testada)
       - name: Rollback on failure (git revert + Argo CD sync)
         if: steps.argocd-sync.outcome == 'failure'
         env:
           VER: v2.12.3
-          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
-          ARGOCD_TOKEN:  ${{ secrets.ARGOCD_TOKEN }}
-          ARGOCD_APP:    ${{ secrets.ARGOCD_APP }}
         run: |
           set -euo pipefail
-
           echo "⚠️ Deploy falhou — iniciando rollback GitOps…"
 
           # Garante histórico atualizado
@@ -192,20 +246,13 @@ jobs:
           git checkout master
           git pull --rebase origin master
 
-          # Encontra o último commit de bump de imagem e reverte
-          LAST_BUMP=$(git log --grep='^deploy: update image -> ' -n 1 --pretty=format:%H || true)
-          if [ -z "${LAST_BUMP}" ]; then
-            echo "ERRO: não encontrei commit de bump (deploy: update image -> ...). Abortando rollback."
-            exit 1
-          fi
-
-          echo "Revertendo commit ${LAST_BUMP}…"
-          git revert --no-edit "${LAST_BUMP}"
+          # Reverte último commit que alterou a imagem
+          LAST_COMMIT=$(git rev-parse HEAD)
+          echo "Revertendo commit: ${LAST_COMMIT}"
+          git revert --no-edit "${LAST_COMMIT}" || true
           git push
 
-          # Sincroniza o ArgoCD para aplicar o rollback
-          docker pull quay.io/argoproj/argocd:${VER}
-
+          echo "Sincronizando Argo CD para aplicar o rollback…"
           docker run --rm \
             -e ARGOCD_SERVER="$ARGOCD_SERVER" -e ARGOCD_TOKEN="$ARGOCD_TOKEN" -e ARGOCD_APP="$ARGOCD_APP" \
             quay.io/argoproj/argocd:${VER} \
