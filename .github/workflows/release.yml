@@ -4,6 +4,10 @@ on:
     branches: [ master ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+  # packages: write   # habilite somente se for publicar em GHCR; para Docker Hub pode omitir
+
 jobs:
   call:
     uses: Devops-Flow/ci-kit/.github/workflows/quarkus-native.yml@v1
