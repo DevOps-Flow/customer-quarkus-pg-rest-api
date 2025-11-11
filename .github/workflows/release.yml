@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   call:
-    uses: Devops-Flow/ci-kit/.github/workflows/quarkus-native.yml@v1
+    uses: Devops-Flow/ci-kit/.github/workflows/quarkus-native.yml@v1.0.1
     with:
       dockerfile: ./Dockerfile.native
       k8s_file: k8s/20-deployment-service.yaml
