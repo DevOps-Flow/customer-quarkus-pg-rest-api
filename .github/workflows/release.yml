@@ -6,7 +6,6 @@ on:
 
 permissions:
   contents: write
-  # packages: write   # habilite somente se for publicar em GHCR; para Docker Hub pode omitir
 
 jobs:
   call:
