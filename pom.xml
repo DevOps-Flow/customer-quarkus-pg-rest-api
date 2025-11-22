@@ -6,7 +6,7 @@
 
   <groupId>com.labsafer</groupId>
   <artifactId>customer-quarkus-pg-rest-api</artifactId>
-  <version>1.0.10</version>
+  <version>1.0.11</version>
   <name>customer-quarkus-pg-rest-api</name>
 
   <properties>
@@ -75,6 +75,12 @@
       <artifactId>quarkus-smallrye-health</artifactId>
     </dependency>
 
+    <!-- OpenAPI -->
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-smallrye-openapi</artifactId>
+    </dependency>
+
     <!-- Tests -->
     <dependency>
       <groupId>io.quarkus</groupId>
@@ -86,6 +92,7 @@
       <artifactId>rest-assured</artifactId>
       <scope>test</scope>
     </dependency>
+
   </dependencies>
 
   <build>
