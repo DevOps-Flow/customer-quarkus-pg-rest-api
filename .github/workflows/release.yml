@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   call:
-    uses: Devops-Flow/ci-kit/.github/workflows/quarkus-native.yml@v1.0.4
+    uses: Devops-Flow/ci-kit/.github/workflows/quarkus-native.yml@v1.0.5
     with:
       runner_label: arc-runner-set
       dockerfile: ./Dockerfile.native
