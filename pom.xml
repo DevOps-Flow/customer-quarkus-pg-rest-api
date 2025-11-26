@@ -6,7 +6,7 @@
 
   <groupId>com.labsafer</groupId>
   <artifactId>customer-quarkus-pg-rest-api</artifactId>
-  <version>1.0.13</version>
+  <version>1.0.14</version>
   <name>customer-quarkus-pg-rest-api</name>
 
   <properties>
