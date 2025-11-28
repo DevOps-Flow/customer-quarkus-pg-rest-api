@@ -1,0 +1,22 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: customer-api
+  namespace: customer-api
+  annotations:
+    konghq.com/plugins: "customer-api-cors"
+spec:
+  parentRefs:
+    - name: kong-gw               # nome do seu Gateway do Kong
+      namespace: kong             # namespace onde o Kong foi instalado
+      sectionName: http           # listener HTTP definido no Gateway
+  hostnames:
+    - customer.lab-safer.com      
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /              # ou /api/v1/customers, se quiser prefixo
+      backendRefs:
+        - name: customer-api-svc
+          port: 80
