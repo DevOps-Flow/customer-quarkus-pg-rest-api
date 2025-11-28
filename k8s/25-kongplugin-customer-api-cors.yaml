@@ -1,0 +1,31 @@
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: customer-api-cors
+  namespace: customer-api
+  annotations:
+    kubernetes.io/ingress.class: "kong"
+plugin: cors
+config:
+  origins:
+    - https://customer-ui.lab-safer.com
+    - http://localhost:8080
+  methods:
+    - GET
+    - POST
+    - PUT
+    - PATCH
+    - DELETE
+    - OPTIONS
+  headers:
+    - Accept
+    - Accept-Version
+    - Content-Length
+    - Content-MD5
+    - Content-Type
+    - Authorization
+  exposed_headers:
+    - Location
+  credentials: true          # se seu frontend mandar cookies/Authorization
+  preflight_continue: false  # Kong responde o OPTIONS sozinho
+  max_age: 3600              # cache do preflight em segundos

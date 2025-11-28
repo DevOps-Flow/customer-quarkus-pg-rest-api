@@ -3,9 +3,11 @@ kind: HTTPRoute
 metadata:
   name: customer-api
   namespace: customer-api
+  annotations:
+    konghq.com/plugins: "customer-api-cors"
 spec:
   parentRefs:
-    - name: kong-gateway          # nome do seu Gateway do Kong
+    - name: kong-gw               # nome do seu Gateway do Kong
       namespace: kong             # namespace onde o Kong foi instalado
       sectionName: http           # listener HTTP definido no Gateway
   hostnames:
@@ -16,5 +18,5 @@ spec:
             type: PathPrefix
             value: /              # ou /api/v1/customers, se quiser prefixo
       backendRefs:
-        - name: customer-api
-          port: 8080
+        - name: customer-api-svc
+          port: 80
